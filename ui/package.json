@@ -1,0 +1,15 @@
+{
+  "name": "@wyre-technology/connectwise-cpq-mcp-ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Build-time-only package for the MCP Apps quote card. Kept out of the server package so ext-apps' v1 @modelcontextprotocol/sdk peer never enters the server dependency graph (the v2 migration contract bans the v1 SDK from the server lockfile). The built card is committed at ../src/generated/quote-card-html.ts, so the server build never needs this package.",
+  "type": "module",
+  "scripts": {
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.7.3",
+    "vite": "^6.0.0",
+    "vite-plugin-singlefile": "^2.1.0"
+  }
+}

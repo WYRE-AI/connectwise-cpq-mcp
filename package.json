@@ -16,7 +16,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "build:ui": "vite build && node scripts/embed-ui.mjs",
+    "build:ui": "npm --prefix ui install && npm --prefix ui run build && node scripts/embed-ui.mjs",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "lint": "eslint src",
@@ -39,7 +39,6 @@
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@modelcontextprotocol/client": "^2.0.0-beta.5",
-    "@modelcontextprotocol/ext-apps": "^1.7.3",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/github": "^12.0.8",
     "@semantic-release/npm": "^13.1.4",
@@ -49,8 +48,6 @@
     "semantic-release": "^25.0.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.61.1",
-    "vite": "^6.0.0",
-    "vite-plugin-singlefile": "^2.1.0",
     "vitest": "^4.1.9"
   },
   "engines": {

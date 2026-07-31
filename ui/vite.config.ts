@@ -1,12 +1,11 @@
 import { defineConfig } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
-// Bundles ui/index.html + ui/quote-card.ts into a single self-contained HTML
-// file at ui/dist/index.html, which scripts/embed-ui.mjs then embeds as
-// src/generated/quote-card-html.ts. Single-file is required: the MCP Apps
+// Bundles index.html + quote-card.ts into a single self-contained HTML file
+// at dist/index.html, which ../scripts/embed-ui.mjs then embeds as
+// ../src/generated/quote-card-html.ts. Single-file is required: the MCP Apps
 // host fetches one HTML string via resources/read, so all JS/CSS must be inlined.
 export default defineConfig({
-  root: "ui",
   plugins: [viteSingleFile()],
   build: {
     outDir: "dist",

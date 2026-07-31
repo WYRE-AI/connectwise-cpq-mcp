@@ -33,6 +33,10 @@ Releases are cut by semantic-release from Conventional Commits.
 - MCP Apps quote card on `cpq_get_quote` (`ui://connectwise-cpq/quote-card.html`,
   ext-apps `^1.7.3`, vite single-file, committed embed): read-only render of quote header,
   badges, line summary, totals; additive `_card` field so non-App hosts get full JSON.
+  The card build lives in its own private `ui/` package (no lockfile,
+  `npm run build:ui` installs it on demand) so ext-apps' v1 `@modelcontextprotocol/sdk`
+  peer never enters the server package's dependency graph or lockfile — the v2 migration
+  contract bans the v1 SDK there.
 - GHCR container (node:22-alpine multi-stage, non-root, linux/amd64), MCP Registry
   `server.json`, fleet CI via the centralized reusable release workflow.
 
