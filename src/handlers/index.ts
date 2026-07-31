@@ -3,7 +3,9 @@
  * (mcp-server.ts); this module maps tool names to handlers and normalizes
  * every failure into an isError text result — errors are never thrown out.
  */
+import type { InputRequiredResult } from "@modelcontextprotocol/server";
 import { CpqError, type CpqClient } from "@wyre-technology/node-connectwise-cpq";
+import { NO_ELICITATION, type ElicitationContext } from "../elicitation.js";
 import {
   listQuoteCustomers,
   updateQuoteCustomer,
@@ -41,7 +43,11 @@ import {
 } from "./lookups.js";
 import { errorResult, ToolInputError, type ToolResult } from "./results.js";
 
-type ToolHandler = (client: CpqClient, args: Record<string, unknown>) => Promise<ToolResult>;
+type ToolHandler = (
+  client: CpqClient,
+  args: Record<string, unknown>,
+  elicitation: ElicitationContext
+) => Promise<ToolResult | InputRequiredResult>;
 
 const HANDLERS: Record<string, ToolHandler> = {
   cpq_test_connection: (client) => testConnection(client),
@@ -86,14 +92,15 @@ function describeCpqError(error: CpqError): string {
 export async function handleToolCall(
   client: CpqClient,
   name: string,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
+  args: Record<string, unknown>,
+  elicitation: ElicitationContext = NO_ELICITATION
+): Promise<ToolResult | InputRequiredResult> {
   const handler = HANDLERS[name];
   if (!handler) {
     return errorResult(`Unknown tool: ${name}`);
   }
   try {
-    return await handler(client, args);
+    return await handler(client, args, elicitation);
   } catch (error) {
     if (error instanceof ToolInputError) {
       return errorResult(`Invalid arguments for ${name}: ${error.message}`);

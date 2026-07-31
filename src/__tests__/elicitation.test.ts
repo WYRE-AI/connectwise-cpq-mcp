@@ -1,71 +1,128 @@
-/** Elicitation helpers: null-fallback on no server / error / timeout / decline. */
-import { afterEach, describe, expect, it, vi } from "vitest";
+/**
+ * Elicitation helpers (MRTR seam): capability-gated `input_required` asks,
+ * response consumption on retry, and the unavailable fallback.
+ */
+import { describe, expect, it } from "vitest";
 import {
   elicitConfirmation,
   elicitSelection,
   elicitText,
+  isRefusal,
+  type ElicitationContext,
 } from "../elicitation.js";
-import { clearServerRef, setServerRef } from "../server-ref.js";
 
-afterEach(() => clearServerRef());
+const FORM_CAPABLE: ElicitationContext = { clientCapabilities: { elicitation: {} } };
 
-describe("without a server ref", () => {
-  it("all helpers return null", async () => {
-    expect(await elicitText("m", "f")).toBeNull();
-    expect(await elicitSelection("m", "f", [{ value: "a", label: "A" }])).toBeNull();
-    expect(await elicitConfirmation("m")).toBeNull();
+function answered(key: string, content: Record<string, unknown>): ElicitationContext {
+  return {
+    clientCapabilities: { elicitation: {} },
+    inputResponses: { [key]: { action: "accept", content } },
+  };
+}
+
+describe("capability gate (design.md §4 graceful fallback)", () => {
+  it("no declared capabilities → unavailable for all helpers", () => {
+    const ctx: ElicitationContext = {};
+    expect(elicitText(ctx, "m", "f").kind).toBe("unavailable");
+    expect(elicitSelection(ctx, "m", "f", [{ value: "a", label: "A" }]).kind).toBe("unavailable");
+    expect(elicitConfirmation(ctx, "m").kind).toBe("unavailable");
+  });
+
+  it("url-only elicitation capability → unavailable (form is not implied)", () => {
+    const ctx: ElicitationContext = { clientCapabilities: { elicitation: { url: {} } } };
+    expect(elicitConfirmation(ctx, "m").kind).toBe("unavailable");
+  });
+
+  it("bare elicitation {} counts as form (the pre-mode meaning)", () => {
+    expect(elicitConfirmation(FORM_CAPABLE, "m").kind).toBe("ask");
+  });
+
+  it("explicit form capability → ask", () => {
+    const ctx: ElicitationContext = { clientCapabilities: { elicitation: { form: {} } } };
+    expect(elicitText(ctx, "m", "f").kind).toBe("ask");
   });
 });
 
-describe("error and timeout fallbacks", () => {
-  it("elicitInput rejection → null (never throws)", async () => {
-    setServerRef({ elicitInput: vi.fn().mockRejectedValue(new Error("unsupported")) } as never);
-    expect(await elicitText("m", "f")).toBeNull();
-    expect(await elicitConfirmation("m")).toBeNull();
+describe("the ask leg builds an input_required result", () => {
+  it("confirmation embeds an elicitation/create request keyed 'confirm'", () => {
+    const outcome = elicitConfirmation(FORM_CAPABLE, "Really delete?");
+    expect(outcome.kind).toBe("ask");
+    if (outcome.kind !== "ask") return;
+    expect(outcome.result.resultType).toBe("input_required");
+    const request = outcome.result.inputRequests?.confirm;
+    expect(request?.method).toBe("elicitation/create");
+    const params = request?.params as {
+      message: string;
+      requestedSchema: { required?: string[] };
+    };
+    expect(params.message).toBe("Really delete?");
+    expect(params.requestedSchema.required).toEqual(["confirm"]);
   });
 
-  it("hung elicitInput times out to null", async () => {
-    setServerRef({ elicitInput: vi.fn().mockReturnValue(new Promise(() => {})) } as never);
-    expect(await elicitText("m", "f", undefined, 20)).toBeNull();
-    expect(await elicitConfirmation("m", 20)).toBeNull();
-    expect(await elicitSelection("m", "f", [{ value: "a", label: "A" }], 20)).toBeNull();
+  it("selection embeds the offered options as an enum", () => {
+    const outcome = elicitSelection(FORM_CAPABLE, "Pick one", "template", [
+      { value: "t-1", label: "One" },
+      { value: "t-2", label: "Two" },
+    ]);
+    expect(outcome.kind).toBe("ask");
+    if (outcome.kind !== "ask") return;
+    const params = outcome.result.inputRequests?.template?.params as {
+      requestedSchema: { properties: Record<string, { enum?: string[] }> };
+    };
+    expect(params.requestedSchema.properties.template.enum).toEqual(["t-1", "t-2"]);
   });
 });
 
-describe("accepted answers", () => {
-  it("text answers pass through", async () => {
-    setServerRef({
-      elicitInput: vi.fn().mockResolvedValue({ action: "accept", content: { f: "hello" } }),
-    } as never);
-    expect(await elicitText("m", "f")).toBe("hello");
+describe("consuming a retried request's responses", () => {
+  it("text answers pass through", () => {
+    const outcome = elicitText(answered("f", { f: "hello" }), "m", "f");
+    expect(outcome).toEqual({ kind: "answer", value: "hello" });
   });
 
-  it("selection returns the chosen value", async () => {
-    setServerRef({
-      elicitInput: vi.fn().mockResolvedValue({ action: "accept", content: { f: "b" } }),
-    } as never);
-    expect(
-      await elicitSelection("m", "f", [
-        { value: "a", label: "A" },
-        { value: "b", label: "B" },
-      ])
-    ).toBe("b");
+  it("selection returns the chosen value", () => {
+    const outcome = elicitSelection(answered("f", { f: "b" }), "m", "f", [
+      { value: "a", label: "A" },
+      { value: "b", label: "B" },
+    ]);
+    expect(outcome).toEqual({ kind: "answer", value: "b" });
   });
 
-  it("confirmation distinguishes accept-true, accept-false, and decline", async () => {
-    setServerRef({
-      elicitInput: vi.fn().mockResolvedValue({ action: "accept", content: { confirm: true } }),
-    } as never);
-    expect(await elicitConfirmation("m")).toBe(true);
+  it("a selection outside the offered options reads as declined (untrusted input)", () => {
+    const outcome = elicitSelection(answered("f", { f: "evil" }), "m", "f", [
+      { value: "a", label: "A" },
+    ]);
+    expect(outcome.kind).toBe("declined");
+  });
 
-    setServerRef({
-      elicitInput: vi.fn().mockResolvedValue({ action: "accept", content: { confirm: false } }),
-    } as never);
-    expect(await elicitConfirmation("m")).toBe(false);
+  it("confirmation distinguishes accept-true, accept-false, and decline", () => {
+    expect(elicitConfirmation(answered("confirm", { confirm: true }), "m")).toEqual({
+      kind: "answer",
+      value: true,
+    });
 
-    setServerRef({
-      elicitInput: vi.fn().mockResolvedValue({ action: "decline" }),
-    } as never);
-    expect(await elicitConfirmation("m")).toBe(false);
+    const acceptFalse = elicitConfirmation(answered("confirm", { confirm: false }), "m");
+    expect(acceptFalse).toEqual({ kind: "answer", value: false });
+    expect(isRefusal(acceptFalse)).toBe(true);
+
+    const declined = elicitConfirmation(
+      {
+        clientCapabilities: { elicitation: {} },
+        inputResponses: { confirm: { action: "decline" } },
+      },
+      "m"
+    );
+    expect(declined.kind).toBe("declined");
+    expect(isRefusal(declined)).toBe(true);
+
+    expect(isRefusal({ kind: "answer", value: true })).toBe(false);
+    expect(isRefusal({ kind: "unavailable" })).toBe(false);
+  });
+
+  it("responses are consumed even without a capability view (shim-fulfilled retries)", () => {
+    const outcome = elicitConfirmation(
+      { inputResponses: { confirm: { action: "accept", content: { confirm: true } } } },
+      "m"
+    );
+    expect(outcome).toEqual({ kind: "answer", value: true });
   });
 });

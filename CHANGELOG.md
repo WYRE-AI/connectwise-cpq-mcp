@@ -23,9 +23,13 @@ Releases are cut by semantic-release from Conventional Commits.
 - Destructive-tool tiering per fleet convention §2.7b: ⚠ DESTRUCTIVE — IRREVERSIBLE on the
   five deletes (idempotentHint:false), ⚠ HIGH-IMPACT on `cpq_update_quote`
   (idempotentHint:true), enforced by `scripts/lint-destructive-warnings.mjs` in CI.
-- MRTR-safe elicitation (additive, try/catch + timeout + null-fallback): date-range prompt
-  on unfiltered quote searches, template disambiguation, quote-tab selection, and delete
-  confirmations — always before the single mutating vendor call.
+- MRTR-safe elicitation on the SDK v2 `inputRequired` seam: date-range prompt on
+  unfiltered quote searches, template disambiguation, quote-tab selection, and delete
+  confirmations — always before the single mutating vendor call. Handlers return
+  `input_required` results that 2026-07-28 clients fulfil and retry (and the SDK's legacy
+  shim fulfils server-side for 2025-era stateful connections); callers without the
+  form-elicitation capability, including stateless legacy HTTP requests, keep the
+  pre-elicitation fallback behavior.
 - MCP Apps quote card on `cpq_get_quote` (`ui://connectwise-cpq/quote-card.html`,
   ext-apps `^1.7.3`, vite single-file, committed embed): read-only render of quote header,
   badges, line summary, totals; additive `_card` field so non-App hosts get full JSON.

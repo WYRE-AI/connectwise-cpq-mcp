@@ -1,6 +1,12 @@
 /** Quote line-item tool handlers (MRTR-safe: reads + elicitation first, one mutation last). */
+import type { InputRequiredResult } from "@modelcontextprotocol/server";
 import type { CpqClient, QuoteItemView } from "@wyre-technology/node-connectwise-cpq";
-import { elicitConfirmation, elicitSelection } from "../elicitation.js";
+import {
+  elicitConfirmation,
+  elicitSelection,
+  isRefusal,
+  type ElicitationContext,
+} from "../elicitation.js";
 import { extractListParams } from "./list-params.js";
 import { resolvePatchOps } from "./patch-args.js";
 import {
@@ -33,8 +39,9 @@ export async function getQuoteItem(
 
 export async function createQuoteItem(
   client: CpqClient,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
+  args: Record<string, unknown>,
+  elicitation: ElicitationContext
+): Promise<ToolResult | InputRequiredResult> {
   const idQuote = requireString(args, "idQuote");
   const item = requireObject(args, "item");
   let idQuoteTabs = optionalString(args, "idQuoteTabs");
@@ -52,7 +59,8 @@ export async function createQuoteItem(
     if (tabs.length === 1) {
       idQuoteTabs = tabs[0].id as string;
     } else {
-      const selected = await elicitSelection(
+      const selected = elicitSelection(
+        elicitation,
         "Which quote tab should this line item be added to?",
         "quoteTab",
         tabs.map((tab) => ({
@@ -62,7 +70,8 @@ export async function createQuoteItem(
             : (tab.id as string),
         }))
       );
-      if (!selected) {
+      if (selected.kind === "ask") return selected.result;
+      if (selected.kind !== "answer") {
         const listing = tabs
           .map((tab) => `${tab.tabName ?? "?"} (${tab.id})`)
           .join(", ");
@@ -70,7 +79,7 @@ export async function createQuoteItem(
           `Quote ${idQuote} has ${tabs.length} tabs — pass "idQuoteTabs" to pick one: ${listing}`
         );
       }
-      idQuoteTabs = selected;
+      idQuoteTabs = selected.value;
     }
   }
 
@@ -94,8 +103,9 @@ export async function updateQuoteItem(
 
 export async function deleteQuoteItem(
   client: CpqClient,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
+  args: Record<string, unknown>,
+  elicitation: ElicitationContext
+): Promise<ToolResult | InputRequiredResult> {
   const id = requireString(args, "id");
 
   // Best-effort read so the confirmation can echo what is being deleted.
@@ -108,10 +118,12 @@ export async function deleteQuoteItem(
     /* confirmation still shows the id */
   }
 
-  const confirmed = await elicitConfirmation(
+  const confirmation = elicitConfirmation(
+    elicitation,
     `Permanently delete ${label}? This cannot be undone.`
   );
-  if (confirmed === false) {
+  if (confirmation.kind === "ask") return confirmation.result;
+  if (isRefusal(confirmation)) {
     return textResult(`Deletion cancelled by user — quote item ${id} was NOT deleted.`);
   }
 

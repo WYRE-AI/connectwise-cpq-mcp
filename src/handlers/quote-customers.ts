@@ -1,6 +1,7 @@
 /** Quote-customer tool handlers (customers exist only per-quote, synced from CRM). */
+import type { InputRequiredResult } from "@modelcontextprotocol/server";
 import type { CpqClient } from "@wyre-technology/node-connectwise-cpq";
-import { elicitConfirmation } from "../elicitation.js";
+import { elicitConfirmation, isRefusal, type ElicitationContext } from "../elicitation.js";
 import { resolvePatchOps } from "./patch-args.js";
 import { jsonResult, requireString, textResult, type ToolResult } from "./results.js";
 
@@ -26,8 +27,9 @@ export async function updateQuoteCustomer(
 
 export async function deleteQuoteCustomer(
   client: CpqClient,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
+  args: Record<string, unknown>,
+  elicitation: ElicitationContext
+): Promise<ToolResult | InputRequiredResult> {
   const quoteId = requireString(args, "quoteId");
   const id = requireString(args, "id");
 
@@ -45,10 +47,12 @@ export async function deleteQuoteCustomer(
     /* confirmation still shows the id */
   }
 
-  const confirmed = await elicitConfirmation(
+  const confirmation = elicitConfirmation(
+    elicitation,
     `Permanently remove ${label} from quote ${quoteId}? This cannot be undone.`
   );
-  if (confirmed === false) {
+  if (confirmation.kind === "ask") return confirmation.result;
+  if (isRefusal(confirmation)) {
     return textResult(`Deletion cancelled by user — customer record ${id} was NOT removed.`);
   }
 

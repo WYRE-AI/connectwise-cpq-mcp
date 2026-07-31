@@ -23,7 +23,6 @@ import {
 import { QUOTE_CARD_HTML } from "./generated/quote-card-html.js";
 import { handleToolCall } from "./handlers/index.js";
 import { errorResult } from "./handlers/results.js";
-import { setServerRef } from "./server-ref.js";
 import { TOOLS } from "./tools.js";
 import { logger } from "./utils/logger.js";
 
@@ -161,7 +160,6 @@ export function createMcpServer(credentials?: CpqCredentials): Server {
     { name: SERVER_NAME, version: SERVER_VERSION },
     { capabilities: { tools: {}, resources: {} } }
   );
-  setServerRef(server);
 
   let client: CpqClient | undefined;
 
@@ -171,7 +169,7 @@ export function createMcpServer(credentials?: CpqCredentials): Server {
     readResourceResult(request.params.uri)
   );
 
-  server.setRequestHandler("tools/call", async (request) => {
+  server.setRequestHandler("tools/call", async (request, ctx) => {
     const { name, arguments: args } = request.params;
     logger.debug("Tool call received", { tool: name });
 
@@ -189,7 +187,15 @@ export function createMcpServer(credentials?: CpqCredentials): Server {
       return errorResult(`Invalid ConnectWise CPQ credentials: ${message}`);
     }
 
-    return handleToolCall(client, name, (args ?? {}) as Record<string, unknown>);
+    return handleToolCall(client, name, (args ?? {}) as Record<string, unknown>, {
+      // Resolved per request: the envelope-declared capabilities on
+      // 2026-07-28 requests (the SDK backfills the accessor from the
+      // validated envelope), the initialize-declared set on 2025-era
+      // connections, undefined on the stateless legacy path — where the
+      // helpers correctly report elicitation as unavailable.
+      clientCapabilities: server.getClientCapabilities(),
+      inputResponses: ctx.mcpReq.inputResponses,
+    });
   });
 
   return server;

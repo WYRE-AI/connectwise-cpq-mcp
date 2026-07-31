@@ -1,12 +1,16 @@
 /**
  * Handler tests against a stubbed CpqClient. Elicitation is exercised through
- * the real helpers by installing a fake Server ref (setServerRef) whose
- * elicitInput we control.
+ * the real MRTR helpers by passing an ElicitationContext: a form-capable
+ * caller with no responses gets an `input_required` ask; a retried request
+ * carries the answer in `inputResponses`; no context means no elicitation
+ * (the stateless legacy fallback).
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { InputRequiredResult } from "@modelcontextprotocol/server";
 import type { CpqClient } from "@wyre-technology/node-connectwise-cpq";
+import type { ElicitationContext } from "../elicitation.js";
 import { handleToolCall } from "../handlers/index.js";
-import { clearServerRef, setServerRef } from "../server-ref.js";
+import type { ToolResult } from "../handlers/results.js";
 
 type Stub = Record<string, Record<string, ReturnType<typeof vi.fn>>>;
 
@@ -53,11 +57,25 @@ function stubClient(overrides: Stub = {}): CpqClient {
   return base as unknown as CpqClient;
 }
 
-function parse(result: { content: Array<{ text: string }> }): Record<string, unknown> {
-  return JSON.parse(result.content[0].text);
+const FORM_CAPABLE: ElicitationContext = { clientCapabilities: { elicitation: {} } };
+
+/** A retried request carrying the user's accepted answer for `key`. */
+function answered(key: string, content: Record<string, unknown>): ElicitationContext {
+  return {
+    clientCapabilities: { elicitation: {} },
+    inputResponses: { [key]: { action: "accept", content } },
+  };
 }
 
-afterEach(() => clearServerRef());
+/** Narrow a handler result to a plain tool result (i.e. not an MRTR ask). */
+function asTool(result: ToolResult | InputRequiredResult): ToolResult {
+  expect((result as { resultType?: string }).resultType).toBeUndefined();
+  return result as ToolResult;
+}
+
+function parse(result: ToolResult | InputRequiredResult): Record<string, unknown> {
+  return JSON.parse(asTool(result).content[0].text);
+}
 
 describe("dispatch", () => {
   it("unknown tool → isError", async () => {
@@ -67,7 +85,7 @@ describe("dispatch", () => {
 
   it("missing required argument → isError, no vendor call", async () => {
     const client = stubClient();
-    const result = await handleToolCall(client, "cpq_get_quote", {});
+    const result = asTool(await handleToolCall(client, "cpq_get_quote", {}));
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('"id"');
     expect((client.quotes.get as unknown as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
@@ -91,14 +109,21 @@ describe("cpq_search_quotes", () => {
     expect(payload.note).toContain("last 90 days");
   });
 
-  it("no conditions + elicited date → uses the user's date", async () => {
-    setServerRef({
-      elicitInput: vi
-        .fn()
-        .mockResolvedValue({ action: "accept", content: { fromDate: "2026-05-01" } }),
-    } as never);
+  it("no conditions + form-capable caller → asks for a date before listing", async () => {
     const client = stubClient();
-    const result = await handleToolCall(client, "cpq_search_quotes", {});
+    const result = await handleToolCall(client, "cpq_search_quotes", {}, FORM_CAPABLE);
+    expect((result as InputRequiredResult).resultType).toBe("input_required");
+    expect(client.quotes.list).not.toHaveBeenCalled();
+  });
+
+  it("no conditions + elicited date → uses the user's date", async () => {
+    const client = stubClient();
+    const result = await handleToolCall(
+      client,
+      "cpq_search_quotes",
+      {},
+      answered("fromDate", { fromDate: "2026-05-01" })
+    );
     expect(parse(result).conditions).toBe("createDate >= [2026-05-01]");
   });
 });
@@ -164,9 +189,11 @@ describe("cpq_create_quote_from_template", () => {
         ]),
       },
     });
-    const result = await handleToolCall(client, "cpq_create_quote_from_template", {
-      templateName: "standard",
-    });
+    const result = asTool(
+      await handleToolCall(client, "cpq_create_quote_from_template", {
+        templateName: "standard",
+      })
+    );
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("t-1");
     expect(client.quotes.copyFromTemplate).not.toHaveBeenCalled();
@@ -246,21 +273,18 @@ describe("cpq_create_quote_item tab resolution", () => {
         listItems: vi.fn(),
       },
     });
-    const result = await handleToolCall(client, "cpq_create_quote_item", {
-      idQuote: "q-1",
-      item: {},
-    });
+    const result = asTool(
+      await handleToolCall(client, "cpq_create_quote_item", {
+        idQuote: "q-1",
+        item: {},
+      })
+    );
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("tab-2");
     expect(client.quoteItems.create).not.toHaveBeenCalled();
   });
 
   it("multiple tabs with elicitation → selected tab wins", async () => {
-    setServerRef({
-      elicitInput: vi
-        .fn()
-        .mockResolvedValue({ action: "accept", content: { quoteTab: "tab-2" } }),
-    } as never);
     const client = stubClient({
       quoteTabs: {
         list: vi.fn().mockResolvedValue([
@@ -270,7 +294,12 @@ describe("cpq_create_quote_item tab resolution", () => {
         listItems: vi.fn(),
       },
     });
-    await handleToolCall(client, "cpq_create_quote_item", { idQuote: "q-1", item: {} });
+    await handleToolCall(
+      client,
+      "cpq_create_quote_item",
+      { idQuote: "q-1", item: {} },
+      answered("quoteTab", { quoteTab: "tab-2" })
+    );
     expect(client.quoteItems.create).toHaveBeenCalledWith(
       expect.objectContaining({ idQuoteTabs: "tab-2" })
     );
@@ -285,28 +314,45 @@ describe("delete confirmations (MRTR-safe: reads first, DELETE last)", () => {
     expect(parse(result).deleted).toBe(true);
   });
 
-  it("explicit decline → cancelled, DELETE never fires", async () => {
-    setServerRef({
-      elicitInput: vi.fn().mockResolvedValue({ action: "accept", content: { confirm: false } }),
-    } as never);
+  it("form-capable caller → asks for confirmation, DELETE has not fired", async () => {
     const client = stubClient();
-    const result = await handleToolCall(client, "cpq_delete_quote", { id: "q-1" });
+    const result = await handleToolCall(client, "cpq_delete_quote", { id: "q-1" }, FORM_CAPABLE);
+    expect((result as InputRequiredResult).resultType).toBe("input_required");
     expect(client.quotes.delete).not.toHaveBeenCalled();
-    expect(result.content[0].text).toContain("cancelled");
+  });
+
+  it("explicit decline → cancelled, DELETE never fires", async () => {
+    const client = stubClient();
+    const result = await handleToolCall(
+      client,
+      "cpq_delete_quote",
+      { id: "q-1" },
+      answered("confirm", { confirm: false })
+    );
+    expect(client.quotes.delete).not.toHaveBeenCalled();
+    expect(asTool(result).content[0].text).toContain("cancelled");
   });
 
   it("confirmation echoes quote context read before the DELETE", async () => {
-    const elicitInput = vi
-      .fn()
-      .mockResolvedValue({ action: "accept", content: { confirm: true } });
-    setServerRef({ elicitInput } as never);
     const client = stubClient({
       quoteItems: { list: vi.fn().mockResolvedValue([{ id: "qi-1" }, { id: "qi-2" }]) },
     });
-    await handleToolCall(client, "cpq_delete_quote", { id: "q-1" });
-    const message = elicitInput.mock.calls[0][0].message as string;
-    expect(message).toContain("Quote A");
-    expect(message).toContain("2 line item(s)");
+    // First round: the ask embeds the read-back context in its message.
+    const ask = await handleToolCall(client, "cpq_delete_quote", { id: "q-1" }, FORM_CAPABLE);
+    const params = (ask as InputRequiredResult).inputRequests?.confirm?.params as {
+      message: string;
+    };
+    expect(params.message).toContain("Quote A");
+    expect(params.message).toContain("2 line item(s)");
+    expect(client.quotes.delete).not.toHaveBeenCalled();
+
+    // Retry round: the accepted confirmation lets the DELETE fire.
+    await handleToolCall(
+      client,
+      "cpq_delete_quote",
+      { id: "q-1" },
+      answered("confirm", { confirm: true })
+    );
     expect(client.quotes.delete).toHaveBeenCalledWith("q-1");
   });
 
@@ -327,7 +373,7 @@ describe("vendor error mapping", () => {
         get: vi.fn().mockRejectedValue(new NotFoundError("Resource not found", { message: "nope" })),
       },
     });
-    const result = await handleToolCall(client, "cpq_get_quote", { id: "missing" });
+    const result = asTool(await handleToolCall(client, "cpq_get_quote", { id: "missing" }));
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("HTTP 404");
   });

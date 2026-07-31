@@ -95,10 +95,16 @@ async function modernLeg() {
   console.log('\nMODERN leg (@modelcontextprotocol/client v2, 2026-07-28 era):');
   const { Client, StreamableHTTPClientTransport } = await import('@modelcontextprotocol/client');
 
-  const client = new Client({ name: 'smoke-modern', version: '0.0.0' });
+  const client = new Client(
+    { name: 'smoke-modern', version: '0.0.0' },
+    // 'auto' negotiates the 2026-07-28 era via server/discover; the default
+    // ('legacy') would silently run a plain 2025 connect sequence.
+    { versionNegotiation: { mode: 'auto' } }
+  );
   const transport = new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`));
   await client.connect(transport);
-  check('client connected', true);
+  const negotiated = client.getNegotiatedProtocolVersion?.();
+  check('client negotiated the 2026-07-28 era', negotiated === '2026-07-28', `negotiated=${negotiated}`);
 
   const { tools } = await client.listTools();
   check('tools/list returns >0 tools', tools.length > 0, `count=${tools.length}`);

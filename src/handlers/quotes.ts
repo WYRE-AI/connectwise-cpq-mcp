@@ -6,13 +6,20 @@
  * (the one sanctioned exception is cpq_create_quote_from_template's optional
  * rename PATCH, which follows the copy but still comes after all elicitation).
  */
+import type { InputRequiredResult } from "@modelcontextprotocol/server";
 import type {
   CpqClient,
   QuoteItemView,
   QuoteView,
 } from "@wyre-technology/node-connectwise-cpq";
 import { attachCard } from "../card.builder.js";
-import { elicitConfirmation, elicitSelection, elicitText } from "../elicitation.js";
+import {
+  elicitConfirmation,
+  elicitSelection,
+  elicitText,
+  isRefusal,
+  type ElicitationContext,
+} from "../elicitation.js";
 import { extractListParams } from "./list-params.js";
 import { resolvePatchOps } from "./patch-args.js";
 import {
@@ -35,19 +42,23 @@ function dateOnly(date: Date): string {
 
 export async function searchQuotes(
   client: CpqClient,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
+  args: Record<string, unknown>,
+  elicitation: ElicitationContext
+): Promise<ToolResult | InputRequiredResult> {
   const params = extractListParams(args);
   let note: string | undefined;
 
   if (!params.conditions) {
     // Elicitation point (read-only, MRTR-safe): ask for a created-since date.
-    const answer = await elicitText(
+    const asked = elicitText(
+      elicitation,
       "No search conditions were given. From what creation date should quotes be " +
         "included? (YYYY-MM-DD)",
       "fromDate",
       "Date-only, e.g. 2026-05-01"
     );
+    if (asked.kind === "ask") return asked.result;
+    const answer = asked.kind === "answer" ? asked.value : null;
     if (answer && ISO_DATE_ONLY.test(answer.trim())) {
       params.conditions = `createDate >= [${answer.trim()}]`;
       note = `Filtered to quotes created since ${answer.trim()} (user-selected).`;
@@ -116,8 +127,9 @@ export async function getQuoteVersions(
 
 export async function createQuoteFromTemplate(
   client: CpqClient,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
+  args: Record<string, unknown>,
+  elicitation: ElicitationContext
+): Promise<ToolResult | InputRequiredResult> {
   let templateId = optionalString(args, "templateId");
   const templateName = optionalString(args, "templateName");
   const newName = optionalString(args, "newName");
@@ -150,7 +162,8 @@ export async function createQuoteFromTemplate(
       templateId = matches[0].id as string;
     } else {
       // Elicitation point: ambiguous name → user selects, before the POST fires.
-      const selected = await elicitSelection(
+      const selected = elicitSelection(
+        elicitation,
         `Multiple templates match "${templateName}". Which one should be copied?`,
         "template",
         matches.map((t) => ({
@@ -158,14 +171,15 @@ export async function createQuoteFromTemplate(
           label: t.name ?? (t.id as string),
         }))
       );
-      if (!selected) {
+      if (selected.kind === "ask") return selected.result;
+      if (selected.kind !== "answer") {
         const candidates = matches.map((t) => `${t.name ?? "?"} (${t.id})`).join(", ");
         return errorResult(
           `Multiple templates match "${templateName}" — pass "templateId" to pick one: ` +
             candidates
         );
       }
-      templateId = selected;
+      templateId = selected.value;
     }
   }
 
@@ -195,8 +209,9 @@ export async function updateQuote(
 
 export async function deleteQuote(
   client: CpqClient,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
+  args: Record<string, unknown>,
+  elicitation: ElicitationContext
+): Promise<ToolResult | InputRequiredResult> {
   const id = requireString(args, "id");
 
   // Read-only context for the confirmation (both best-effort).
@@ -224,12 +239,14 @@ export async function deleteQuote(
     itemCount = undefined;
   }
 
-  const confirmed = await elicitConfirmation(
+  const confirmation = elicitConfirmation(
+    elicitation,
     `Permanently delete quote ${summary}` +
       `${itemCount !== undefined ? ` and its ${itemCount} line item(s)` : ""}, ` +
       `including all tabs and terms? This cannot be undone.`
   );
-  if (confirmed === false) {
+  if (confirmation.kind === "ask") return confirmation.result;
+  if (isRefusal(confirmation)) {
     return textResult(`Deletion cancelled by user — quote ${id} was NOT deleted.`);
   }
 
@@ -239,8 +256,9 @@ export async function deleteQuote(
 
 export async function deleteQuoteVersion(
   client: CpqClient,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
+  args: Record<string, unknown>,
+  elicitation: ElicitationContext
+): Promise<ToolResult | InputRequiredResult> {
   const quoteNumber = requireInteger(args, "quoteNumber");
   const quoteVersion = requireInteger(args, "quoteVersion");
 
@@ -253,11 +271,13 @@ export async function deleteQuoteVersion(
     /* confirmation still shows number/version */
   }
 
-  const confirmed = await elicitConfirmation(
+  const confirmation = elicitConfirmation(
+    elicitation,
     `Permanently delete version ${quoteVersion} of quote #${quoteNumber}${label}? ` +
       `This cannot be undone.`
   );
-  if (confirmed === false) {
+  if (confirmation.kind === "ask") return confirmation.result;
+  if (isRefusal(confirmation)) {
     return textResult(
       `Deletion cancelled by user — quote #${quoteNumber} v${quoteVersion} was NOT deleted.`
     );
