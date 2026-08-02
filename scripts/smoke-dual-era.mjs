@@ -4,7 +4,13 @@
 //       notifications/initialized → tools/list.
 //   (b) MODERN leg — @modelcontextprotocol/client@2 (StreamableHTTP transport,
 //       2026-07-28 negotiation): connect → tools/list.
-// Both legs must see the same non-empty tool surface. Run after `npm run build`:
+// Both legs must see the same non-empty tool surface.
+//   (c) GATEWAY leg — a second process in AUTH_MODE=gateway with NO env
+//       credentials, proving the 401 gate rejects missing/partial credential
+//       headers rather than falling through to env-configured ones. That
+//       fallthrough would be a cross-tenant leak, so it is asserted here and
+//       not only unit-tested against a hand-mirrored replica of the router.
+// Run after `npm run build`:
 //   node scripts/smoke-dual-era.mjs
 
 import { spawn } from 'node:child_process';
@@ -16,6 +22,15 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const serverEntry = resolve(root, 'dist/index.js');
 const PORT = 38700 + Math.floor(Math.random() * 200);
 const BASE = `http://127.0.0.1:${PORT}`;
+const GATEWAY_PORT = PORT + 300;
+const GATEWAY_BASE = `http://127.0.0.1:${GATEWAY_PORT}`;
+
+/** The gateway-injected credential headers, per the conduit vendor-config headerMapping. */
+const CRED_HEADERS = {
+  'X-CPQ-Access-Key': 'gateway-access-key',
+  'X-CPQ-Public-Key': 'gateway-public-key',
+  'X-CPQ-Private-Key': 'gateway-private-key',
+};
 
 const failures = [];
 function check(label, ok, detail = '') {
@@ -48,16 +63,70 @@ async function legacyPost(body) {
   });
 }
 
-async function waitForHealth(timeoutMs = 15000) {
+async function waitForHealth(base = BASE, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`${BASE}/health`);
+      const res = await fetch(`${base}/health`);
       if (res.ok) return res.json();
     } catch { /* not up yet */ }
     await new Promise((r) => setTimeout(r, 200));
   }
-  throw new Error(`Server did not become healthy on ${BASE} within ${timeoutMs}ms`);
+  throw new Error(`Server did not become healthy on ${base} within ${timeoutMs}ms`);
+}
+
+/**
+ * Gateway leg: a separate process in AUTH_MODE=gateway started with the CPQ_*
+ * env vars explicitly stripped, so a 200 on an unauthenticated request could
+ * only mean the gate fell through to env credentials — the cross-tenant leak
+ * this asserts against.
+ */
+async function gatewayLeg(expectedToolCount) {
+  console.log('\nGATEWAY leg (AUTH_MODE=gateway, no env credentials):');
+  const { CPQ_ACCESS_KEY, CPQ_PUBLIC_KEY, CPQ_PRIVATE_KEY, ...cleanEnv } = process.env;
+  const child = spawn(process.execPath, [serverEntry], {
+    cwd: root,
+    env: {
+      ...cleanEnv,
+      AUTH_MODE: 'gateway',
+      MCP_TRANSPORT: 'http',
+      MCP_HTTP_PORT: String(GATEWAY_PORT),
+      MCP_HTTP_HOST: '127.0.0.1',
+      LOG_LEVEL: 'error',
+    },
+    stdio: ['ignore', 'inherit', 'inherit'],
+  });
+
+  const post = (headers, body) =>
+    fetch(`${GATEWAY_BASE}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...headers },
+      body: JSON.stringify(body),
+    });
+  const toolsList = { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} };
+
+  try {
+    await waitForHealth(GATEWAY_BASE);
+
+    const none = await post({}, toolsList);
+    check('no credential headers → 401', none.status === 401, `status=${none.status}`);
+    const body = await none.json().catch(() => null);
+    check('401 body is a JSON-RPC error naming the required headers',
+      body?.error?.code === -32001 && Array.isArray(body?.error?.data?.required),
+      `code=${body?.error?.code} required=${(body?.error?.data?.required ?? []).join(',')}`);
+
+    const { 'X-CPQ-Private-Key': _omitted, ...partial } = CRED_HEADERS;
+    const partialRes = await post(partial, toolsList);
+    check('partial credential headers → 401 (no partial bind)', partialRes.status === 401, `status=${partialRes.status}`);
+
+    const full = await post(CRED_HEADERS, toolsList);
+    check('complete credential headers → 200', full.status === 200, `status=${full.status}`);
+    const tools = (await mcpBody(full))?.result?.tools ?? [];
+    check('gateway mode serves the same tool surface', tools.length === expectedToolCount,
+      `gateway=${tools.length} expected=${expectedToolCount}`);
+  } finally {
+    child.kill('SIGTERM');
+  }
 }
 
 async function legacyLeg() {
@@ -149,6 +218,8 @@ async function main() {
     const drift = [...legacyNames].filter((n) => !modernNames.has(n))
       .concat([...modernNames].filter((n) => !legacyNames.has(n)));
     check('both eras serve the same tool names', drift.length === 0, drift.join(', ') || 'no drift');
+
+    await gatewayLeg(modernTools.length);
   } catch (error) {
     check('smoke run completed without exception', false, String(error));
   } finally {
@@ -159,7 +230,7 @@ async function main() {
     console.error(`\nSMOKE FAILED: ${failures.length} check(s): ${failures.join('; ')}`);
     process.exit(1);
   }
-  console.log('\nSMOKE PASSED: both protocol eras served by the same factory.');
+  console.log('\nSMOKE PASSED: both protocol eras served by the same factory; gateway gate rejects incomplete credentials.');
   process.exit(0);
 }
 

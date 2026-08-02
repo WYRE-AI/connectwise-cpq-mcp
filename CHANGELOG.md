@@ -10,6 +10,15 @@ Releases are cut by semantic-release from Conventional Commits.
 
 ### Added
 
+- `scripts/smoke-dual-era.mjs` gained a third leg exercising `AUTH_MODE=gateway`
+  end-to-end against the real HTTP entrypoint: with the `CPQ_*` env vars stripped from
+  the child process, it asserts that missing and partial credential headers are both
+  rejected with a 401 (-32001) naming the required headers, that complete headers return
+  200, and that the gateway-bound tool surface matches the env-mode one. Previously the
+  401 gate was covered only by a unit test against a hand-mirrored copy of the router,
+  so router drift — or a regression into env-credential fallthrough, which would be a
+  cross-tenant leak — could not have been caught.
+
 - Initial ConnectWise CPQ (Sell) MCP server: flat 25-tool surface (13 reads, 12 writes)
   over `@wyre-technology/node-connectwise-cpq` — quotes, versions, line items, customers,
   tabs, terms, templates, tax codes, recurring revenues, and users.
