@@ -1,10 +1,11 @@
 /** Quote payment/financing term tool handlers. */
 import type { InputRequiredResult } from "@modelcontextprotocol/server";
 import type { CpqClient, QuoteTermView } from "@wyre-technology/node-connectwise-cpq";
-import { elicitConfirmation, isRefusal, type ElicitationContext } from "../elicitation.js";
+import { confirmDestructive, type ElicitationContext } from "../elicitation.js";
 import { extractListParams } from "./list-params.js";
 import { resolvePatchOps } from "./patch-args.js";
 import {
+  errorResult,
   jsonResult,
   requireObject,
   requireString,
@@ -61,12 +62,14 @@ export async function deleteQuoteTerm(
     /* confirmation still shows the id */
   }
 
-  const confirmation = elicitConfirmation(
+  const gate = confirmDestructive(
     elicitation,
+    args,
     `Permanently delete ${label} from quote ${quoteId}? This cannot be undone.`
   );
-  if (confirmation.kind === "ask") return confirmation.result;
-  if (isRefusal(confirmation)) {
+  if (gate.kind === "ask") return gate.result;
+  if (gate.kind === "blocked") return errorResult(gate.message);
+  if (gate.kind === "refused") {
     return textResult(`Deletion cancelled by user — quote term ${id} was NOT deleted.`);
   }
 

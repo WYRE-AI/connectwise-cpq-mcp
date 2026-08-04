@@ -8,6 +8,19 @@ Releases are cut by semantic-release from Conventional Commits.
 
 ## [Unreleased]
 
+### Security
+
+- Destructive tools now **fail closed** when the client cannot be prompted. `unavailable`
+  elicitation was previously treated as consent, so on the deployment that matters — the
+  WYRE Conduit gateway, a non-interactive stateless caller — every `cpq_delete_*` tool ran
+  with no confirmation at all, while the CPQ plugin skills documented that deletes "ask for
+  confirmation first". The five delete tools now refuse to run for a caller that declared
+  no elicitation capability unless it passes the new `confirm_destructive_action: true`
+  argument, and the refusal names that argument. Interactive clients are unaffected: the
+  prompt still fires and the new argument cannot suppress it. Optional (non-destructive)
+  elicitation keeps its permissive fallback, so non-interactive callers retain the full
+  read and non-destructive write surface.
+
 ### Changed
 
 - Dropped the `deploy` job from the release workflow. ConnectWise CPQ is a
@@ -20,6 +33,12 @@ Releases are cut by semantic-release from Conventional Commits.
   The release, Docker, security-scan and MCP Registry jobs are unaffected.
 
 ### Added
+
+- `confirm_destructive_action` (boolean, optional) on `cpq_delete_quote`,
+  `cpq_delete_quote_version`, `cpq_delete_quote_item`, `cpq_delete_quote_term` and
+  `cpq_delete_quote_customer` — the explicit consent path for non-interactive callers
+  behind the fail-closed gate above. Declared in each tool's input schema, so gateway
+  callers can actually satisfy it.
 
 - `scripts/smoke-dual-era.mjs` gained a third leg exercising `AUTH_MODE=gateway`
   end-to-end against the real HTTP entrypoint: with the `CPQ_*` env vars stripped from
@@ -49,7 +68,8 @@ Releases are cut by semantic-release from Conventional Commits.
   `input_required` results that 2026-07-28 clients fulfil and retry (and the SDK's legacy
   shim fulfils server-side for 2025-era stateful connections); callers without the
   form-elicitation capability, including stateless legacy HTTP requests, keep the
-  pre-elicitation fallback behavior.
+  pre-elicitation fallback behavior for the non-destructive prompts — the delete
+  confirmations fail closed instead (see Security above).
 - MCP Apps quote card on `cpq_get_quote` (`ui://connectwise-cpq/quote-card.html`,
   ext-apps `^1.7.3`, vite single-file, committed embed): read-only render of quote header,
   badges, line summary, totals; additive `_card` field so non-App hosts get full JSON.

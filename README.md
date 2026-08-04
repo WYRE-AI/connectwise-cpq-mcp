@@ -76,17 +76,30 @@ build failure leaves the JSON untouched. Rebuild the embedded UI with `npm run b
 (output committed at `src/generated/quote-card-html.ts`). Brand at serve time via
 `MCP_BRAND_*` env vars.
 
-## Elicitation
+## Elicitation and destructive-action consent
 
 Where the connected client supports elicitation, the server asks before acting: date range
 on unfiltered quote searches, template pick on ambiguous names, tab pick when adding items,
 and confirmation before every delete. Elicitation rides the SDK v2 MRTR seam: handlers
 return `input_required` results (embedded `elicitation/create` requests) that 2026-07-28
 clients fulfil and retry, and that the SDK's legacy shim fulfils server-side for 2025-era
-stateful connections (stdio). Callers that never declared the form-elicitation capability —
-including stateless legacy HTTP requests — fall back to the pre-elicitation behavior. All
-elicitation is MRTR-safe: no vendor mutation ever fires before an elicitation point, so a
-client retry of the original request cannot duplicate a write.
+stateful connections (stdio). All elicitation is MRTR-safe: no vendor mutation ever fires
+before an elicitation point, so a client retry of the original request cannot duplicate a
+write.
+
+Callers that never declared the form-elicitation capability — including stateless legacy
+HTTP requests, which is how the WYRE Conduit gateway connects — cannot be prompted at all.
+What that means depends on the stakes:
+
+- **Optional** elicitation degrades gracefully (design.md §4): an unfiltered search falls
+  back to a default 90-day range and says so, and the ambiguous template/tab pickers
+  return an error listing the candidates.
+- **Destructive** tools fail closed. A client that cannot answer has not consented, so the
+  five `cpq_delete_*` tools refuse to run and return an actionable error naming what to do.
+  A non-interactive caller opts in per call with `"confirm_destructive_action": true`,
+  declared in each destructive tool's input schema so the gate is actually satisfiable.
+  That argument is consulted *only* when no prompt is possible — it can never skip a
+  confirmation an interactive user would otherwise have seen.
 
 ## Vendor quirks encoded here
 

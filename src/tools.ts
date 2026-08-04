@@ -13,6 +13,7 @@
  */
 import type { Tool } from "@modelcontextprotocol/server";
 import { CARD_META } from "./card.builder.js";
+import { CONFIRM_ARG_PROPERTY } from "./elicitation.js";
 
 // ── Shared schema fragments ────────────────────────────────────────────────
 
@@ -417,6 +418,7 @@ export const TOOLS: Tool[] = [
       type: "object",
       properties: {
         id: { type: "string", description: "Quote item GUID id." },
+        ...CONFIRM_ARG_PROPERTY,
       },
       required: ["id"],
     },
@@ -438,6 +440,7 @@ export const TOOLS: Tool[] = [
       properties: {
         quoteId: { type: "string", description: "Quote GUID id." },
         id: { type: "string", description: "Quote term GUID id." },
+        ...CONFIRM_ARG_PROPERTY,
       },
       required: ["quoteId", "id"],
     },
@@ -459,6 +462,7 @@ export const TOOLS: Tool[] = [
       properties: {
         quoteId: { type: "string", description: "Quote GUID id." },
         id: { type: "string", description: "Customer record GUID id." },
+        ...CONFIRM_ARG_PROPERTY,
       },
       required: ["quoteId", "id"],
     },
@@ -480,6 +484,7 @@ export const TOOLS: Tool[] = [
       properties: {
         quoteNumber: { type: "number", description: "Integer quote number." },
         quoteVersion: { type: "number", description: "Integer version to delete." },
+        ...CONFIRM_ARG_PROPERTY,
       },
       required: ["quoteNumber", "quoteVersion"],
     },
@@ -500,6 +505,7 @@ export const TOOLS: Tool[] = [
       type: "object",
       properties: {
         id: { type: "string", description: "Quote GUID id." },
+        ...CONFIRM_ARG_PROPERTY,
       },
       required: ["id"],
     },

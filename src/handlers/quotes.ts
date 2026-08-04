@@ -14,10 +14,9 @@ import type {
 } from "@wyre-technology/node-connectwise-cpq";
 import { attachCard } from "../card.builder.js";
 import {
-  elicitConfirmation,
+  confirmDestructive,
   elicitSelection,
   elicitText,
-  isRefusal,
   type ElicitationContext,
 } from "../elicitation.js";
 import { extractListParams } from "./list-params.js";
@@ -239,14 +238,16 @@ export async function deleteQuote(
     itemCount = undefined;
   }
 
-  const confirmation = elicitConfirmation(
+  const gate = confirmDestructive(
     elicitation,
+    args,
     `Permanently delete quote ${summary}` +
       `${itemCount !== undefined ? ` and its ${itemCount} line item(s)` : ""}, ` +
       `including all tabs and terms? This cannot be undone.`
   );
-  if (confirmation.kind === "ask") return confirmation.result;
-  if (isRefusal(confirmation)) {
+  if (gate.kind === "ask") return gate.result;
+  if (gate.kind === "blocked") return errorResult(gate.message);
+  if (gate.kind === "refused") {
     return textResult(`Deletion cancelled by user — quote ${id} was NOT deleted.`);
   }
 
@@ -271,13 +272,15 @@ export async function deleteQuoteVersion(
     /* confirmation still shows number/version */
   }
 
-  const confirmation = elicitConfirmation(
+  const gate = confirmDestructive(
     elicitation,
+    args,
     `Permanently delete version ${quoteVersion} of quote #${quoteNumber}${label}? ` +
       `This cannot be undone.`
   );
-  if (confirmation.kind === "ask") return confirmation.result;
-  if (isRefusal(confirmation)) {
+  if (gate.kind === "ask") return gate.result;
+  if (gate.kind === "blocked") return errorResult(gate.message);
+  if (gate.kind === "refused") {
     return textResult(
       `Deletion cancelled by user — quote #${quoteNumber} v${quoteVersion} was NOT deleted.`
     );

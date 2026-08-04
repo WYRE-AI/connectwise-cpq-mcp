@@ -1,9 +1,15 @@
 /** Quote-customer tool handlers (customers exist only per-quote, synced from CRM). */
 import type { InputRequiredResult } from "@modelcontextprotocol/server";
 import type { CpqClient } from "@wyre-technology/node-connectwise-cpq";
-import { elicitConfirmation, isRefusal, type ElicitationContext } from "../elicitation.js";
+import { confirmDestructive, type ElicitationContext } from "../elicitation.js";
 import { resolvePatchOps } from "./patch-args.js";
-import { jsonResult, requireString, textResult, type ToolResult } from "./results.js";
+import {
+  errorResult,
+  jsonResult,
+  requireString,
+  textResult,
+  type ToolResult,
+} from "./results.js";
 
 export async function listQuoteCustomers(
   client: CpqClient,
@@ -47,12 +53,14 @@ export async function deleteQuoteCustomer(
     /* confirmation still shows the id */
   }
 
-  const confirmation = elicitConfirmation(
+  const gate = confirmDestructive(
     elicitation,
+    args,
     `Permanently remove ${label} from quote ${quoteId}? This cannot be undone.`
   );
-  if (confirmation.kind === "ask") return confirmation.result;
-  if (isRefusal(confirmation)) {
+  if (gate.kind === "ask") return gate.result;
+  if (gate.kind === "blocked") return errorResult(gate.message);
+  if (gate.kind === "refused") {
     return textResult(`Deletion cancelled by user — customer record ${id} was NOT removed.`);
   }
 

@@ -7,8 +7,9 @@
  * - a 2026-07-28 client with the elicitation capability gets the delete
  *   confirmation as an embedded `elicitation/create` request (auto-fulfilled
  *   by the v2 client) — decline cancels the DELETE, accept lets it fire;
- * - a stateless 2025-era caller (no capability view) falls back to the
- *   pre-elicitation behavior (design.md §4): the DELETE proceeds.
+ * - a stateless 2025-era caller (no capability view) — how the WYRE Conduit
+ *   gateway connects — cannot be prompted, so the DELETE is BLOCKED unless the
+ *   request carries an explicit `confirm_destructive_action`.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import http from "node:http";
@@ -119,9 +120,10 @@ describe("elicitation over the live dual-era serving stack", () => {
     expect(JSON.parse(text).deleted).toBe(true);
   });
 
-  it("stateless 2025-era caller: no capability view → pre-elicitation fallback proceeds", async () => {
-    quotesApi.delete.mockClear();
-
+  /** One stateless 2025-era tools/call — no initialize, so no capability view. */
+  async function statelessDelete(
+    args: Record<string, unknown>
+  ): Promise<{ isError?: boolean; text: string }> {
     const res = await fetch(`${base}/mcp`, {
       method: "POST",
       headers: {
@@ -132,7 +134,7 @@ describe("elicitation over the live dual-era serving stack", () => {
         jsonrpc: "2.0",
         id: 1,
         method: "tools/call",
-        params: { name: "cpq_delete_quote", arguments: { id: "q-1" } },
+        params: { name: "cpq_delete_quote", arguments: args },
       }),
     });
     expect(res.status).toBe(200);
@@ -141,8 +143,26 @@ describe("elicitation over the live dual-era serving stack", () => {
     const message = JSON.parse(
       (dataLines.length > 0 ? dataLines[dataLines.length - 1].slice(5) : text).trim()
     );
-    const resultText = message.result?.content?.[0]?.text ?? "";
-    expect(JSON.parse(resultText).deleted).toBe(true);
+    return {
+      isError: message.result?.isError,
+      text: message.result?.content?.[0]?.text ?? "",
+    };
+  }
+
+  it("stateless 2025-era caller: no capability view → the DELETE is blocked, not assumed", async () => {
+    quotesApi.delete.mockClear();
+
+    const { isError, text } = await statelessDelete({ id: "q-1" });
+    expect(isError).toBe(true);
+    expect(text).toContain("confirm_destructive_action");
+    expect(quotesApi.delete).not.toHaveBeenCalled();
+  });
+
+  it("stateless 2025-era caller: explicit confirmation lets the DELETE fire", async () => {
+    quotesApi.delete.mockClear();
+
+    const { text } = await statelessDelete({ id: "q-1", confirm_destructive_action: true });
+    expect(JSON.parse(text).deleted).toBe(true);
     expect(quotesApi.delete).toHaveBeenCalledWith("q-1");
   });
 });

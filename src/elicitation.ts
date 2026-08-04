@@ -10,10 +10,17 @@
  * handler re-executes from the top on retry, so handlers must complete all
  * reads and elicitation BEFORE the single mutating vendor call.
  *
- * Graceful degradation (design.md §4) is preserved: when the caller never
- * declared form-elicitation capability — including the stateless legacy
- * path, where per-request instances see no `initialize` — helpers report
- * `unavailable` and callers fall back to their pre-elicitation behavior.
+ * Graceful degradation (design.md §4) is preserved for OPTIONAL elicitation:
+ * when the caller never declared form-elicitation capability — including the
+ * stateless legacy path, where per-request instances see no `initialize` —
+ * helpers report `unavailable` and callers fall back to their pre-elicitation
+ * behavior (a default date range, an error listing the candidates, …).
+ *
+ * Destructive actions do NOT degrade that way. `unavailable` is the absence of
+ * consent, not consent, and the production caller (the WYRE Conduit gateway)
+ * is exactly such a client — so a permissive fallback there means every delete
+ * runs unconfirmed. `confirmDestructive` below fails closed instead: it blocks
+ * with an actionable error unless the caller passed `CONFIRM_ARG` explicitly.
  */
 import { inputRequired, inputResponse } from "@modelcontextprotocol/server";
 import type { ClientCapabilities, InputRequiredResult } from "@modelcontextprotocol/server";
@@ -151,9 +158,10 @@ export function elicitText(
 
 /**
  * Ask the user to confirm an action (keyed `confirm`). An accepted
- * `confirm: false` reads as an answer of `false` — callers should cancel on
- * both that and `declined`, proceed on `answer: true` and `unavailable`
- * (pre-elicitation behavior preserved), and return `result` on `ask`.
+ * `confirm: false` reads as an answer of `false`, which — like `declined` —
+ * means cancel. Destructive callers must not consume this outcome directly:
+ * route them through `confirmDestructive`, which owns what `unavailable`
+ * means for an irreversible action.
  */
 export function elicitConfirmation(
   ctx: ElicitationContext,
@@ -177,4 +185,64 @@ export function elicitConfirmation(
 /** True when the outcome means the user said no (declined or answered false). */
 export function isRefusal(outcome: ElicitOutcome<boolean>): boolean {
   return outcome.kind === "declined" || (outcome.kind === "answer" && !outcome.value);
+}
+
+/**
+ * The argument through which a caller that cannot be prompted supplies
+ * confirmation for a destructive action. Declared to callers by
+ * `CONFIRM_ARG_PROPERTY` — the gate below is only satisfiable because the
+ * argument is visible in the destructive tools' input schemas.
+ */
+export const CONFIRM_ARG = "confirm_destructive_action";
+
+/** Input-schema fragment for `CONFIRM_ARG`; spread into destructive tools' `properties`. */
+export const CONFIRM_ARG_PROPERTY = {
+  [CONFIRM_ARG]: {
+    type: "boolean" as const,
+    description:
+      "Explicit confirmation for this irreversible action. Required only when the client " +
+      "declared no elicitation capability and therefore cannot be prompted (e.g. the " +
+      "gateway); interactive clients are prompted instead, and this argument never " +
+      "suppresses that prompt.",
+  },
+};
+
+/** What a destructive handler should do next. */
+export type DestructiveGate =
+  /** Confirmed — run the mutation. */
+  | { kind: "proceed" }
+  /** Return `result`; the caller retries with the user's answer. */
+  | { kind: "ask"; result: InputRequiredResult }
+  /** The user said no — cancel, in the handler's own words. */
+  | { kind: "refused" }
+  /** Nobody can confirm — return `message` as an error and mutate nothing. */
+  | { kind: "blocked"; message: string };
+
+/**
+ * The consent gate for irreversible actions. Interactive callers are prompted
+ * exactly as before. Callers that cannot be prompted must pass
+ * `CONFIRM_ARG: true`; without it the action is BLOCKED, because a client that
+ * cannot answer has not consented (see the module header).
+ *
+ * The prompt always wins where it is available: passing the argument never
+ * skips a confirmation an interactive user would otherwise have seen.
+ */
+export function confirmDestructive(
+  ctx: ElicitationContext,
+  args: Record<string, unknown>,
+  message: string
+): DestructiveGate {
+  const outcome = elicitConfirmation(ctx, message);
+  if (outcome.kind === "ask") return { kind: "ask", result: outcome.result };
+  if (outcome.kind === "unavailable") {
+    if (args[CONFIRM_ARG] === true) return { kind: "proceed" };
+    return {
+      kind: "blocked",
+      message:
+        "Confirmation required, but this client cannot be prompted for it (it declared " +
+        `no elicitation capability). Nothing was changed. Pending action: ${message} ` +
+        `To proceed, re-invoke this tool with "${CONFIRM_ARG}": true.`,
+    };
+  }
+  return isRefusal(outcome) ? { kind: "refused" } : { kind: "proceed" };
 }
