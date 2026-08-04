@@ -27,16 +27,26 @@ jobs:
       image-name: ghcr.io/wyre-technology/connectwise-cpq-mcp
     secrets: inherit
 
-  deploy:
-    needs: release
-    if: needs.release.outputs.released == 'true'
-    permissions:
-      id-token: write
-      contents: read
-    uses: wyre-technology/.github/.github/workflows/mcp-server-deploy.yml@a61021de876d0fd44dac777fa90f963fea25b0c3
-    with:
-      vendor-slug: connectwise-cpq
-      image-name: ghcr.io/wyre-technology/connectwise-cpq-mcp
-      digest: ${{ needs.release.outputs.digest }}
-      version: ${{ needs.release.outputs.version }}
-    secrets: inherit
+# NO `deploy:` job — deliberate. ConnectWise CPQ is a CONDUIT-ONLY vendor.
+#
+# The fleet-standard `mcp-server-deploy.yml` deploys to `gwp-<slug>` in the
+# `mcp-gateway-prod` resource group — the separate, still-live legacy fleet
+# (53 apps as of 2026-08-04), NOT conduit. Conduit's sidecars are deployed
+# from `azure/vendor-fleet.conduit-prod.bicepparam` by conduit's own
+# `deploy-vendor-fleet.yml`, where connectwise-cpq is digest-pinned and
+# running. Nothing in this repo deploys conduit, so the job had nothing to do
+# here: with no `gwp-connectwise-cpq` Container App it could only ever fail.
+#
+# It did, on the v1.0.0 release: `AADSTS7002131` (no Azure federated identity
+# credential exists for `repo:wyre-technology/connectwise-cpq-mcp:environment:
+# production`). Registering that credential would not have helped — the target
+# ACA does not exist either, so `az containerapp update` would fail next.
+#
+# This matches the other conduit-only vendors: scalepad-mcp and clio-mcp both
+# call `mcp-server-release.yml` with no deploy job.
+#
+# If CPQ is ever wanted on the legacy gateway too, all three are required:
+#   1. az ad app federated-credential create for this repo's production subject
+#   2. create the `gwp-connectwise-cpq` ACA in `mcp-gateway-prod`
+#   3. register the vendor in the `mcp-gateway` repo
+# then restore this job.

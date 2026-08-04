@@ -8,6 +8,17 @@ Releases are cut by semantic-release from Conventional Commits.
 
 ## [Unreleased]
 
+### Changed
+
+- Dropped the `deploy` job from the release workflow. ConnectWise CPQ is a
+  conduit-only vendor: the fleet-standard `mcp-server-deploy.yml` targets
+  `gwp-<slug>` in the separate, still-live legacy `mcp-gateway-prod` fleet, not
+  conduit, whose sidecars deploy from conduit's own `vendor-fleet` bicepparam.
+  With no `gwp-connectwise-cpq` Container App the job could only fail, and on
+  v1.0.0 it did (`AADSTS7002131` — no federated identity credential for this
+  repo). Matches scalepad-mcp and clio-mcp, the other conduit-only vendors.
+  The release, Docker, security-scan and MCP Registry jobs are unaffected.
+
 ### Added
 
 - `scripts/smoke-dual-era.mjs` gained a third leg exercising `AUTH_MODE=gateway`
