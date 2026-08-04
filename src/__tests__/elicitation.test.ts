@@ -4,6 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  CONFIRM_ARG,
+  confirmDestructive,
   elicitConfirmation,
   elicitSelection,
   elicitText,
@@ -124,5 +126,60 @@ describe("consuming a retried request's responses", () => {
       "m"
     );
     expect(outcome).toEqual({ kind: "answer", value: true });
+  });
+});
+
+describe("confirmDestructive (fail-closed gate for irreversible actions)", () => {
+  const NON_INTERACTIVE: ElicitationContext = {};
+
+  it("non-interactive caller without explicit confirmation → blocked", () => {
+    const gate = confirmDestructive(NON_INTERACTIVE, {}, "Permanently delete quote X?");
+    expect(gate.kind).toBe("blocked");
+    if (gate.kind !== "blocked") return;
+    expect(gate.message).toContain(CONFIRM_ARG);
+    expect(gate.message).toContain("Permanently delete quote X?");
+  });
+
+  it("non-interactive caller with an explicit confirmation → proceeds", () => {
+    expect(confirmDestructive(NON_INTERACTIVE, { [CONFIRM_ARG]: true }, "m").kind).toBe(
+      "proceed"
+    );
+  });
+
+  it("only a literal true satisfies the gate", () => {
+    for (const value of ["true", 1, {}, false, null, undefined]) {
+      expect(confirmDestructive(NON_INTERACTIVE, { [CONFIRM_ARG]: value }, "m").kind).toBe(
+        "blocked"
+      );
+    }
+  });
+
+  it("url-only elicitation is still non-interactive for confirmations", () => {
+    const ctx: ElicitationContext = { clientCapabilities: { elicitation: { url: {} } } };
+    expect(confirmDestructive(ctx, {}, "m").kind).toBe("blocked");
+  });
+
+  it("a promptable caller is always prompted — the argument cannot skip it", () => {
+    expect(confirmDestructive(FORM_CAPABLE, {}, "m").kind).toBe("ask");
+    expect(confirmDestructive(FORM_CAPABLE, { [CONFIRM_ARG]: true }, "m").kind).toBe("ask");
+  });
+
+  it("an answered prompt decides: accept → proceed, reject/decline → refused", () => {
+    expect(confirmDestructive(answered("confirm", { confirm: true }), {}, "m").kind).toBe(
+      "proceed"
+    );
+    expect(confirmDestructive(answered("confirm", { confirm: false }), {}, "m").kind).toBe(
+      "refused"
+    );
+    expect(
+      confirmDestructive(
+        {
+          clientCapabilities: { elicitation: {} },
+          inputResponses: { confirm: { action: "decline" } },
+        },
+        {},
+        "m"
+      ).kind
+    ).toBe("refused");
   });
 });

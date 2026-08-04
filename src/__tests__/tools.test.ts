@@ -1,6 +1,7 @@
 /** Tool-surface contract tests: count, names, order, schemas, warnings, annotations. */
 import { describe, expect, it } from "vitest";
 import { CARD_RESOURCE_URI } from "../card.builder.js";
+import { CONFIRM_ARG } from "../elicitation.js";
 import { TOOLS, TOOL_NAMES } from "../tools.js";
 
 /** design.md §2 order — the single source of truth for the surface. */
@@ -64,6 +65,21 @@ describe("tool surface", () => {
         idempotentHint: false,
         openWorldHint: true,
       });
+    }
+  });
+
+  it("every destructive tool declares the non-interactive confirmation argument", () => {
+    for (const name of TIER_A) {
+      const schema = TOOLS.find((t) => t.name === name)!.inputSchema as {
+        properties: Record<string, { type?: string }>;
+        required?: string[];
+      };
+      // Without this the fail-closed gate would be unsatisfiable: a gateway
+      // caller cannot pass an argument the schema never advertises.
+      expect(schema.properties[CONFIRM_ARG], name).toBeDefined();
+      expect(schema.properties[CONFIRM_ARG].type, name).toBe("boolean");
+      // Optional on purpose — interactive clients confirm by prompt instead.
+      expect(schema.required ?? [], name).not.toContain(CONFIRM_ARG);
     }
   });
 

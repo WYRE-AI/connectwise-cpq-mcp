@@ -8,7 +8,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { InputRequiredResult } from "@modelcontextprotocol/server";
 import type { CpqClient } from "@wyre-technology/node-connectwise-cpq";
-import type { ElicitationContext } from "../elicitation.js";
+import { CONFIRM_ARG, type ElicitationContext } from "../elicitation.js";
 import { handleToolCall } from "../handlers/index.js";
 import type { ToolResult } from "../handlers/results.js";
 
@@ -307,11 +307,32 @@ describe("cpq_create_quote_item tab resolution", () => {
 });
 
 describe("delete confirmations (MRTR-safe: reads first, DELETE last)", () => {
-  it("no elicitation support → proceeds (pre-elicitation behavior preserved)", async () => {
+  it("non-interactive caller without confirmation → blocked, DELETE never fires", async () => {
     const client = stubClient();
-    const result = await handleToolCall(client, "cpq_delete_quote_item", { id: "qi-1" });
-    expect(client.quoteItems.delete).toHaveBeenCalledWith("qi-1");
-    expect(parse(result).deleted).toBe(true);
+    const result = asTool(await handleToolCall(client, "cpq_delete_quote_item", { id: "qi-1" }));
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain(CONFIRM_ARG);
+    expect(client.quoteItems.delete).not.toHaveBeenCalled();
+  });
+
+  it("every destructive tool blocks a non-interactive caller and proceeds with consent", async () => {
+    const calls: Array<[string, Record<string, unknown>]> = [
+      ["cpq_delete_quote_item", { id: "qi-1" }],
+      ["cpq_delete_quote_term", { quoteId: "q-1", id: "qt-1" }],
+      ["cpq_delete_quote_customer", { quoteId: "q-1", id: "qc-1" }],
+      ["cpq_delete_quote_version", { quoteNumber: 7, quoteVersion: 2 }],
+      ["cpq_delete_quote", { id: "q-1" }],
+    ];
+    for (const [name, args] of calls) {
+      const client = stubClient();
+      const blocked = asTool(await handleToolCall(client, name, args));
+      expect(blocked.isError, name).toBe(true);
+      expect(blocked.content[0].text, name).toContain(CONFIRM_ARG);
+
+      const confirmed = await handleToolCall(client, name, { ...args, [CONFIRM_ARG]: true });
+      expect(asTool(confirmed).isError, name).toBeUndefined();
+      expect(parse(confirmed).deleted, name).toBe(true);
+    }
   });
 
   it("form-capable caller → asks for confirmation, DELETE has not fired", async () => {
