@@ -43,7 +43,7 @@ before the MCP handler runs — it never falls through to env credentials.
 ## Running
 
 ```bash
-export NODE_AUTH_TOKEN=$(gh auth token)   # GitHub Packages auth for @wyre-technology/*
+export NODE_AUTH_TOKEN=$(gh auth token)   # GitHub Packages auth for @wyre-ai/*
 npm install
 npm run build
 node dist/index.js                        # stdio (default)
@@ -54,7 +54,7 @@ node scripts/smoke-dual-era.mjs           # proves both protocol eras serve the 
 > **Local-dev note:** `@wyre-technology/node-connectwise-cpq` is declared at `^1.0.0` but is
 > not yet published; until the SDK's first release lands, `npm ci` from a fresh clone fails.
 > Install the locally built SDK tarball instead:
-> `npm install /path/to/wyre-technology-node-connectwise-cpq-0.0.0-semantically-released.tgz`
+> `npm install /path/to/wyre-ai-node-connectwise-cpq-0.0.0-semantically-released.tgz`
 > (then keep `package.json` at `^1.0.0`).
 
 Docker (linux/amd64 per fleet law):

@@ -13,9 +13,9 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies with GitHub Packages auth for @wyre-technology/* scope.
+# Install dependencies with GitHub Packages auth for @wyre-ai/* scope.
 # --ignore-scripts prevents lifecycle scripts from running before source is copied.
-RUN echo "@wyre-technology:registry=https://npm.pkg.github.com" > .npmrc && \
+RUN echo "@wyre-ai:registry=https://npm.pkg.github.com" > .npmrc && \
     echo "//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}" >> .npmrc && \
     npm ci --ignore-scripts && \
     rm -f .npmrc
@@ -87,11 +87,11 @@ LABEL org.opencontainers.image.description="Model Context Protocol server for Co
 LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.revision="${COMMIT_SHA}"
-LABEL org.opencontainers.image.source="https://github.com/wyre-technology/connectwise-cpq-mcp"
-LABEL org.opencontainers.image.documentation="https://github.com/wyre-technology/connectwise-cpq-mcp/blob/main/README.md"
-LABEL org.opencontainers.image.url="https://github.com/wyre-technology/connectwise-cpq-mcp/pkgs/container/connectwise-cpq-mcp"
+LABEL org.opencontainers.image.source="https://github.com/WYRE-AI/connectwise-cpq-mcp"
+LABEL org.opencontainers.image.documentation="https://github.com/WYRE-AI/connectwise-cpq-mcp/blob/main/README.md"
+LABEL org.opencontainers.image.url="https://github.com/WYRE-AI/connectwise-cpq-mcp/pkgs/container/connectwise-cpq-mcp"
 LABEL org.opencontainers.image.vendor="Wyre Technology"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 # MCP Registry ownership annotation (must match `name` in server.json)
-LABEL io.modelcontextprotocol.server.name="io.github.wyre-technology/connectwise-cpq-mcp"
+LABEL io.modelcontextprotocol.server.name="io.github.WYRE-AI/connectwise-cpq-mcp"
