@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.wyre-technology/connectwise-cpq-mcp",
+  "name": "io.github.WYRE-AI/connectwise-cpq-mcp",
   "title": "ConnectWise CPQ",
   "description": "MCP server for ConnectWise CPQ (Sell) — quotes, line items, customers, terms, and templates.",
   "repository": {
-    "url": "https://github.com/wyre-technology/connectwise-cpq-mcp",
+    "url": "https://github.com/WYRE-AI/connectwise-cpq-mcp",
     "source": "github"
   },
   "version": "0.0.0",
-  "websiteUrl": "https://github.com/wyre-technology/connectwise-cpq-mcp",
+  "websiteUrl": "https://github.com/WYRE-AI/connectwise-cpq-mcp",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/wyre-technology/connectwise-cpq-mcp:0.0.0",
+      "identifier": "ghcr.io/wyre-ai/connectwise-cpq-mcp:0.0.0",
       "transport": {
         "type": "stdio"
       },

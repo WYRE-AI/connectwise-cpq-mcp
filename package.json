@@ -1,5 +1,5 @@
 {
-  "name": "@wyre-technology/connectwise-cpq-mcp",
+  "name": "@wyre-ai/connectwise-cpq-mcp",
   "version": "0.0.0-semantically-released",
   "description": "ConnectWise CPQ (Sell) MCP server for Claude",
   "type": "module",
@@ -27,7 +27,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wyre-technology/connectwise-cpq-mcp.git"
+    "url": "git+https://github.com/WYRE-AI/connectwise-cpq-mcp.git"
   },
   "author": "WYRE Technology",
   "license": "Apache-2.0",
