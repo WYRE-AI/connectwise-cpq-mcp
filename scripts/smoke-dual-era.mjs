@@ -92,6 +92,11 @@ async function gatewayLeg(expectedToolCount) {
       MCP_TRANSPORT: 'http',
       MCP_HTTP_PORT: String(GATEWAY_PORT),
       MCP_HTTP_HOST: '127.0.0.1',
+      // Loopback-only dev bypass so this smoke can exercise the credential
+      // gate without a provisioned service-to-service secret. S2S enforcement
+      // is covered by src/__tests__/http-s2s-auth.test.ts.
+      MCP_ALLOW_INSECURE_DEV: '1',
+      CONDUIT_S2S_SECRET: '',
       LOG_LEVEL: 'error',
     },
     stdio: ['ignore', 'inherit', 'inherit'],
@@ -194,6 +199,10 @@ async function main() {
       MCP_TRANSPORT: 'http',
       MCP_HTTP_PORT: String(PORT),
       MCP_HTTP_HOST: '127.0.0.1',
+      // Same loopback dev bypass as the gateway leg. Do not inherit a real
+      // CONDUIT_S2S_SECRET from the caller; these requests are unsigned.
+      MCP_ALLOW_INSECURE_DEV: '1',
+      CONDUIT_S2S_SECRET: '',
       // env-mode dummy credentials — tools/list never touches the vendor API
       CPQ_ACCESS_KEY: 'dummy-access-key',
       CPQ_PUBLIC_KEY: 'dummy-public-key',
