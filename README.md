@@ -40,6 +40,39 @@ CPQ requires an **API user** and CPQ 2022.2+. Three parts, all required:
 In gateway mode a request missing any header is answered `401` (JSON-RPC error `-32001`)
 before the MCP handler runs — it never falls through to env credentials.
 
+Copy [`.env.example`](.env.example) for local configuration. Leave `CONDUIT_S2S_SECRET` empty in that file.
+
+| Variable | Required | Description |
+|---|---|---|
+| `CPQ_ACCESS_KEY`, `CPQ_PUBLIC_KEY`, `CPQ_PRIVATE_KEY` | For stdio and `AUTH_MODE=env` | ConnectWise CPQ API user keys. The gateway Compose service does not set these. |
+| `MCP_TRANSPORT` | No | `stdio` (default) or `http` |
+| `AUTH_MODE` | No | `gateway` (Docker image and Compose default) or `env`. Gateway mode requires the three `X-CPQ-*` headers on each `/mcp` request and never falls back to `CPQ_*`. `env` uses those variables only after S2S auth succeeds. |
+| `CONDUIT_S2S_SECRET` | Yes for HTTP | Service-to-service secret. The HTTP server logs an error and exits non-zero when this is empty or a known placeholder (`changeme`, `replace-with-a-real-secret`, and the other public example values). Compose will not start without it. Never commit a real value. Generate one with `openssl rand -hex 32`. |
+| `MCP_ALLOW_INSECURE_DEV` | No | Set to exactly `1` only for local development to start HTTP without `CONDUIT_S2S_SECRET`. The process logs a warning and does not enforce `X-Gateway-S2S`. The listener is forced to `127.0.0.1` even if `MCP_HTTP_HOST` is a wider address such as `0.0.0.0`. A placeholder secret is still refused. |
+| `MCP_HTTP_HOST` | No | Bind address when `MCP_TRANSPORT=http`. Defaults to `127.0.0.1`. Honored when `CONDUIT_S2S_SECRET` is set. The container image sets `0.0.0.0`. |
+| `MCP_HTTP_PORT` | No | HTTP port. Defaults to `8080`. |
+
+`/health` and `/healthz` stay unauthenticated and do not read credentials. The stdio transport does not use `CONDUIT_S2S_SECRET`.
+
+### HTTP authentication
+
+With `MCP_TRANSPORT=http` and `CONDUIT_S2S_SECRET` set, every `/mcp` request must include `X-Gateway-S2S`. The check is `verifyS2sHeader` in [`src/s2s-verify.ts`](src/s2s-verify.ts): the header value is `t=<unix seconds>,v1=<hex>`, where the hex is HMAC-SHA256 of the literal string `t=<unix seconds>` keyed with `CONDUIT_S2S_SECRET` (64 lowercase hex characters). The timestamp must be within 300 seconds of the server clock. A missing or invalid header returns 401 before vendor credentials are read.
+
+```bash
+TS=$(date +%s)
+SIG=$(printf 't=%s' "$TS" | openssl dgst -sha256 -hmac "$CONDUIT_S2S_SECRET" -hex | awk '{print $NF}')
+curl -sS http://127.0.0.1:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H "X-Gateway-S2S: t=${TS},v1=${SIG}" \
+  -H 'X-CPQ-Access-Key: your-access-key' \
+  -H 'X-CPQ-Public-Key: your-public-key' \
+  -H 'X-CPQ-Private-Key: your-private-key' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+In `AUTH_MODE=gateway` those three `X-CPQ-*` headers are the only credential source for that request. With `AUTH_MODE=env`, a signed request uses `CPQ_ACCESS_KEY`, `CPQ_PUBLIC_KEY`, and `CPQ_PRIVATE_KEY` from the environment when the headers are absent.
+
 ## Running
 
 ```bash
@@ -47,8 +80,14 @@ export NODE_AUTH_TOKEN=$(gh auth token)   # GitHub Packages auth for @wyre-ai/*
 npm install
 npm run build
 node dist/index.js                        # stdio (default)
-MCP_TRANSPORT=http node dist/index.js     # HTTP on :8080 (/mcp, /health)
+CONDUIT_S2S_SECRET="$CONDUIT_S2S_SECRET" MCP_TRANSPORT=http node dist/index.js
 node scripts/smoke-dual-era.mjs           # proves both protocol eras serve the same tools
+```
+
+Local HTTP without a secret is development-only. It binds `127.0.0.1` (a non-loopback `MCP_HTTP_HOST` is overridden and logged) and logs a warning:
+
+```bash
+MCP_TRANSPORT=http MCP_ALLOW_INSECURE_DEV=1 node dist/index.js
 ```
 
 > **Local-dev note:** `@wyre-technology/node-connectwise-cpq` is declared at `^1.0.0` but is
@@ -59,10 +98,34 @@ node scripts/smoke-dual-era.mjs           # proves both protocol eras serve the 
 
 Docker (linux/amd64 per fleet law):
 
+The image listens on `0.0.0.0` inside the container (`MCP_HTTP_HOST`) and defaults to `AUTH_MODE=gateway`. Publish the port on loopback and pass the S2S secret. In gateway mode, CPQ credentials arrive on each request as headers; they are not read from the environment.
+
 ```bash
 docker build --platform linux/amd64 --build-arg GITHUB_TOKEN=$(gh auth token) \
   -t connectwise-cpq-mcp .
-docker run -p 8080:8080 -e CPQ_ACCESS_KEY=... -e CPQ_PUBLIC_KEY=... -e CPQ_PRIVATE_KEY=... \
+docker run \
+  -e CONDUIT_S2S_SECRET \
+  -p 127.0.0.1:8080:8080 \
+  connectwise-cpq-mcp
+```
+
+Compose refuses to start when `CONDUIT_S2S_SECRET` is unset, defaults `AUTH_MODE` to `gateway`, publishes `127.0.0.1:8080:8080`, and does not inject `CPQ_ACCESS_KEY`, `CPQ_PUBLIC_KEY`, or `CPQ_PRIVATE_KEY`:
+
+```bash
+export CONDUIT_S2S_SECRET="$(openssl rand -hex 32)"
+GITHUB_TOKEN=$(gh auth token) docker compose up
+```
+
+Single-tenant HTTP (`AUTH_MODE=env`) still requires the S2S secret, then uses the `CPQ_*` variables:
+
+```bash
+docker run \
+  -e CONDUIT_S2S_SECRET \
+  -e AUTH_MODE=env \
+  -e CPQ_ACCESS_KEY=... \
+  -e CPQ_PUBLIC_KEY=... \
+  -e CPQ_PRIVATE_KEY=... \
+  -p 127.0.0.1:8080:8080 \
   connectwise-cpq-mcp
 ```
 
